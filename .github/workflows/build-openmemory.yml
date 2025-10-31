@@ -1,0 +1,75 @@
+name: Build and Push OpenMemory MCP Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'openmemory/**'
+      - '.github/workflows/build-openmemory.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghostinthenn/openmemory-mcp
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate tags
+        id: meta
+        run: |
+          # Get short commit SHA
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-8)
+
+          # Get current date in YYYYMMDD format
+          DATE_TAG=$(date +%Y%m%d)
+
+          # Build tag list
+          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"
+          TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${DATE_TAG}"
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "date=${DATE_TAG}" >> $GITHUB_OUTPUT
+          echo "sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openmemory/api
+          file: ./openmemory/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+
+      - name: Output image tags
+        run: |
+          echo "✅ Successfully built and pushed image with tags:"
+          echo "  - latest"
+          echo "  - sha-${{ steps.meta.outputs.sha }}"
+          echo "  - ${{ steps.meta.outputs.date }}"
+          echo ""
+          echo "Pull with: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
